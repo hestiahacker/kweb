@@ -20,12 +20,13 @@
 */
 
 #include <gtk/gtk.h>
-#include <webkit/webkit.h>
+#include <webkit2/webkit2.h>
 #include <gdk/gdkkeysyms.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int window_count = 0;
@@ -46,7 +47,7 @@ static gboolean useOMX = TRUE;
 static int  defaultw = 1920;
 static int defaulth = 1080;
 static gfloat current_zoom = 1.0;
-static WebKitWebSettings* settings;
+static WebKitSettings* settings;
 static SoupCookieJar* cookiejar;
 static char* homedir;
 static char* homepage;
@@ -84,14 +85,14 @@ static void goHome(GtkWidget* window, WebKitWebView* webView)
 
 static void web_zoom_plus(GtkWidget* window, WebKitWebView* webView)
 {
-	webkit_web_view_zoom_in(webView);
-	current_zoom = webkit_web_view_get_zoom_level(webView);
+	current_zoom = webkit_web_view_get_zoom_level(webView) + .25;
+	webkit_web_view_set_zoom_level(webView, current_zoom);
 }
 
 static void web_zoom_minus(GtkWidget* window, WebKitWebView* webView)
 {
-	webkit_web_view_zoom_out(webView);
-	current_zoom = webkit_web_view_get_zoom_level(webView);
+	current_zoom = webkit_web_view_get_zoom_level(webView) - 0.25;
+	webkit_web_view_set_zoom_level(webView, current_zoom);
 }
 
 static void web_zoom_100(GtkWidget* window, WebKitWebView* webView)
@@ -108,7 +109,7 @@ static gboolean downloadRequested(WebKitWebView*  webView,
                               GtkEntry* entry)
 { if (external_download == TRUE)
 {
-        const char* uri = webkit_download_get_uri(download);
+        const char* uri = webkit_uri_request_get_uri(webkit_download_get_request(download));
         int r = 0;
         r = fork();
         if (r==0) {
@@ -117,9 +118,9 @@ static gboolean downloadRequested(WebKitWebView*  webView,
 }
 else
 {
-	const char* fname = webkit_download_get_suggested_filename(download);
+	const char* fname = webkit_download_get_destination(download);
 	const char* dluri = g_strjoin(NULL,"file://",homedir,"/Downloads/",fname, NULL );
-	webkit_download_set_destination_uri(download,dluri);
+	webkit_download_set_destination(download,dluri);
 	const char* msg = g_strjoin(NULL,"downloading: ",fname, NULL );
 	if (kioskmode == FALSE) {
 	gtk_entry_set_text(entry, msg); }
@@ -129,10 +130,10 @@ else
 
 static void searchText(WebKitWebView* webView, gchar* searchString)
 {
-        webkit_web_view_unmark_text_matches(webView);
-        webkit_web_view_search_text(webView, searchString, false, true, true);
-        webkit_web_view_mark_text_matches(webView, searchString, false, 0);
-        webkit_web_view_set_highlight_text_matches(webView, true);
+//        webkit_web_view_unmark_text_matches(webView);
+//        webkit_web_view_search_text(webView, searchString, false, true, true);
+//        webkit_web_view_mark_text_matches(webView, searchString, false, 0);
+//        webkit_web_view_set_highlight_text_matches(webView, true);
 }
 
 static void setJbutton(GtkWidget* window)
@@ -200,7 +201,7 @@ static void toggleOmx(GtkWidget* item, WebKitWebView* webView)
 static void toggleZoom(GtkWidget* item, WebKitWebView* webView)
 {
 	full_zoom = gtk_toggle_tool_button_get_active(GTK_TOGGLE_TOOL_BUTTON(item));
-	webkit_web_view_set_full_content_zoom(webView,full_zoom);	
+	webkit_web_view_set_zoom_level(webView,full_zoom);
 }
 
 static void reload(GtkWidget* window, WebKitWebView* webView)
@@ -249,7 +250,7 @@ static void activateEntry(GtkWidget* entry, gpointer* gdata)
                 gtk_entry_set_text(GTK_ENTRY(entry), g_strjoin(NULL, search_str, s, NULL));
 		if ((startpage == TRUE) && (full_zoom == TRUE) && (current_zoom != 1.0)) { 
 			full_zoom = FALSE;
-			webkit_web_view_set_full_content_zoom(webView,full_zoom);	
+	                webkit_web_view_set_zoom_level(webView,1.0);
 			if (kioskmode == FALSE) {
 				GtkWidget* window = g_object_get_data(G_OBJECT(entry), "window");
 				setZbutton(window); }
@@ -403,7 +404,7 @@ static gboolean web_key_pressed(GtkWidget* window, GdkEventKey* event, WebKitWeb
                 case GDK_KEY_t:
                         if(full_zoom == TRUE) {
 			full_zoom = FALSE;
-			webkit_web_view_set_full_content_zoom(webView,full_zoom);
+	                webkit_web_view_set_zoom_level(webView,1.0);
 			if (kioskmode == FALSE) {
 				setZbutton(window); }
 			}
@@ -411,7 +412,7 @@ static gboolean web_key_pressed(GtkWidget* window, GdkEventKey* event, WebKitWeb
                 case GDK_KEY_g:
                         if(full_zoom == FALSE) {
 			full_zoom = TRUE;
-			webkit_web_view_set_full_content_zoom(webView,full_zoom);	
+	                webkit_web_view_set_zoom_level(webView,1.0);
 			if (kioskmode == FALSE) {
 				setZbutton(window); }
 			}
@@ -446,14 +447,14 @@ static gboolean web_key_pressed(GtkWidget* window, GdkEventKey* event, WebKitWeb
         return FALSE;
 }
 
-static gboolean navigationPolicyDecision(WebKitWebView*             webView,
-                                         WebKitWebFrame*            frame,
-                                         WebKitNetworkRequest*      request,
-                                         WebKitWebNavigationAction* action,
-                                         WebKitWebPolicyDecision*   decision,
-                                         GtkEntry*                  entry )
+static gboolean navigationPolicyDecision(WebKitWebView*          webView,
+                                         WebKitWebView*          frame,
+                                         WebKitURIRequest*       request,
+                                         WebKitNavigationAction* action,
+                                         WebKitPolicyDecision*   decision,
+                                         GtkEntry*               entry )
 {
-        const char* uri = webkit_network_request_get_uri(request);
+        const char* uri = webkit_uri_request_get_uri(request);
 	const char* siteuri = webkit_web_view_get_uri(webView);
 	if ((strncmp(uri, homecommand, hclen ) == 0 )  && ((strncmp(uri, "file:///", 8 ) == 0)  || (strncmp(siteuri,"http://localhost:",17) == 0) || (strncmp(siteuri,"http://localhost/",17) == 0) )){
         	int r = 0;
@@ -461,22 +462,23 @@ static gboolean navigationPolicyDecision(WebKitWebView*             webView,
         	if (r == 0) {
                 	execl("/usr/local/bin/kwebhelper.py", "kwebhelper.py", "cmd", uri, NULL);
       			}
-	webkit_web_policy_decision_ignore(decision);
+	webkit_policy_decision_ignore(decision);
 	return TRUE;
 	}
 
-	if ((webkit_web_frame_get_parent(frame) == NULL) && (kioskmode == FALSE)) {
-        	gtk_entry_set_text(entry, uri); }
-        return FALSE;
+//	if ((webkit_web_frame_get_parent(frame) == NULL) && (kioskmode == FALSE)) {
+//        	gtk_entry_set_text(entry, uri); }
+//        return FALSE;
+	return TRUE;
 }
 
-static gboolean mimePolicyDecision( WebKitWebView*           webView,
-                                    WebKitWebFrame*          frame,
-                                    WebKitNetworkRequest*    request,
-                                    gchar*                   mimetype,
-                                    WebKitWebPolicyDecision* policy_decision,
-                                    gpointer*                user_data)
-{	const char* uri = webkit_network_request_get_uri(request);
+static gboolean mimePolicyDecision( WebKitWebView*        webView,
+                                    WebKitWebView*        frame,
+                                    WebKitURIRequest*     request,
+                                    gchar*                mimetype,
+                                    WebKitPolicyDecision* policy_decision,
+                                    gpointer*             user_data)
+{	const char* uri = webkit_uri_request_get_uri(request);
 
         if (((strncmp(mimetype, "video/", 6) == 0) || (strncmp(mimetype, "audio/", 6) == 0) ||
             (strncmp(mimetype, "application/octet-stream", 24) == 0)) && (useOMX == TRUE)) {
@@ -485,7 +487,7 @@ static gboolean mimePolicyDecision( WebKitWebView*           webView,
         if (r == 0) {
                 execl("/usr/local/bin/kwebhelper.py", "kwebhelper.py", "av", uri, mimetype, NULL);
         }
-                webkit_web_policy_decision_ignore(policy_decision);
+                webkit_policy_decision_ignore(policy_decision);
                 return TRUE;
         }
 
@@ -496,7 +498,7 @@ static gboolean mimePolicyDecision( WebKitWebView*           webView,
         if (r == 0) {
                 execl("/usr/local/bin/kwebhelper.py", "kwebhelper.py", "pdf", uri, NULL);
         }
-                webkit_web_policy_decision_ignore(policy_decision);
+                webkit_policy_decision_ignore(policy_decision);
                 return TRUE;
         }
 
@@ -504,8 +506,8 @@ static gboolean mimePolicyDecision( WebKitWebView*           webView,
 }
 
 static WebKitWebView* createWebView (WebKitWebView*  parentWebView,
-                                     WebKitWebFrame* frame,
-                                     gchar*           arg)
+                                     WebKitWebView*  frame,
+                                     gchar*          arg)
 {
         window_count++;
         GtkWidget*     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -531,7 +533,7 @@ static WebKitWebView* createWebView (WebKitWebView*  parentWebView,
         g_object_set(G_OBJECT(settings), "enable-webgl", TRUE,NULL); }
 
         webkit_web_view_set_settings(WEBKIT_WEB_VIEW(webView), settings);
-	webkit_web_view_set_full_content_zoom(webView,full_zoom);
+	webkit_web_view_set_zoom_level(webView,full_zoom);
 	if (full_zoom == FALSE) {
 	webkit_web_view_set_zoom_level(webView, current_zoom); }
 
@@ -699,13 +701,13 @@ int main( int argc, char* argv[] )
         homedir = getenv("HOME");
         const char* cookie_file_name = g_strjoin(NULL, homedir, "/.web_cookie_jar", NULL);
         gtk_init(&argc, &argv);
-        SoupSession* session = webkit_get_default_session();
+//        SoupSession* session = webkit_get_default_session();
         SoupSessionFeature* feature;
         cookiejar = soup_cookie_jar_text_new(cookie_file_name,FALSE);
         feature = (SoupSessionFeature*)(cookiejar);
-        soup_session_add_feature(session, feature);
+//        soup_session_add_feature(session, feature);
         soup_cookie_jar_set_accept_policy(cookiejar, SOUP_COOKIE_JAR_ACCEPT_NEVER);
-        settings = webkit_web_settings_new();
+        settings = webkit_settings_new();
         homepage = g_strjoin(NULL,"file://",homedir,"/homepage.html", NULL );
 	search_str = "https://startpage.com/do/search?q=";
 	struct stat stb;
