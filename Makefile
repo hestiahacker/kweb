@@ -1,7 +1,7 @@
 prefix=/usr
 
 kweb: kweb.c
-	gcc -O kweb.c -o kweb `pkg-config --cflags gtk+-3.0 --libs webkit2gtk-4.0`
+	gcc -O kweb.c -o kweb `pkg-config --cflags gtk4 --libs webkitgtk-6.0`
 
 install: kweb
 	sudo install -g dialout kweb $(prefix)/bin
